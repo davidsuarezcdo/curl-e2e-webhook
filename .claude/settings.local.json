@@ -22,7 +22,9 @@
       "Bash(./example-test.sh:*)",
       "Bash(node dist/main.js:*)",
       "Bash(pnpm rebuild:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(journalctl:*)",
+      "mcp__curl-e2e-webhook__getTestResults"
     ]
   },
   "enableAllProjectMcpServers": true,
