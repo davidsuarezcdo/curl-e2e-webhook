@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run build:*)",
+      "Bash(claude --debug:*)",
+      "Bash(ls:*)",
+      "Bash(lsof:*)",
+      "Bash(ss:*)",
+      "Bash(kill:*)",
+      "Bash(timeout:*)",
+      "Bash(pkill:*)",
+      "Bash(fuser:*)",
+      "mcp__curl-e2e-webhook__executeHttpRequest",
+      "mcp__curl-e2e-webhook__executeCurlAndWaitWebhook",
+      "mcp__curl-e2e-webhook__getWebhookUrl",
+      "Bash(npm install:*)",
+      "Bash(wc:*)",
+      "Bash(pnpm install:*)",
+      "Bash(pnpm approve-builds:*)",
+      "Bash(pnpm run build:*)",
+      "Bash(chmod:*)",
+      "Bash(./example-test.sh:*)"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "curl-e2e-webhook"
+  ]
+}
