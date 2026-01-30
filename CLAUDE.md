@@ -19,15 +19,70 @@ pnpm install
 # Build TypeScript to JavaScript
 pnpm run build
 
-# Development mode with hot reload
-pnpm run dev
-
 # Watch mode (auto-rebuild on changes)
 pnpm run watch
 
-# Start the server
-pnpm start
+# Development mode - MCP Server (stdio)
+pnpm run dev:mcp
+
+# Development mode - HTTP Webhook Server
+pnpm run dev:http
+
+# Production - Start MCP Server (stdio)
+pnpm run start:mcp
+
+# Production - Start HTTP Webhook Server (runs independently)
+pnpm run start:http
 ```
+
+**Important**: The HTTP webhook server (`main-http.ts`) must run as a separate, independent process to receive webhooks. The MCP server (`main.ts`) is invoked on-demand by Claude Desktop and does NOT start the HTTP server.
+
+## Running the Servers
+
+### Two-Server Architecture
+
+This project has two separate entry points that run as independent processes:
+
+1. **HTTP Webhook Server** (`main-http.ts`) - Must be running continuously
+   - Receives webhook callbacks from external systems
+   - Runs on port 3456 (configurable via `WEBHOOK_PORT`)
+   - Start with: `pnpm run start:http` or `pnpm run dev:http`
+
+2. **MCP Server** (`main.ts`) - Invoked on-demand by Claude Desktop
+   - Provides MCP tools to Claude Desktop
+   - Communicates via stdio (not HTTP)
+   - Started automatically when Claude uses the tools
+   - Does NOT start the HTTP server
+
+### Typical Workflow
+
+1. **Start the HTTP server first** (keep it running):
+   ```bash
+   pnpm run dev:http
+   # or in production:
+   pnpm run start:http
+   ```
+
+2. **Configure Claude Desktop** to use the MCP server (in `claude_desktop_config.json`):
+   ```json
+   {
+     "mcpServers": {
+       "compara-test-tools": {
+         "command": "node",
+         "args": ["/path/to/mcp-compara-test-tools/dist/main.js"],
+         "env": {
+           "WEBHOOK_PORT": "3456",
+           "WEBHOOK_BASE_URL": "http://localhost:3456",
+           "DB_PATH": "./webhook-tests.db"
+         }
+       }
+     }
+   }
+   ```
+
+3. **Use the MCP tools** in Claude Desktop - the MCP server starts automatically
+
+Both servers share the same SQLite database for coordination.
 
 ## Architecture
 
@@ -36,32 +91,32 @@ The codebase follows **Clean Architecture** principles with clear separation of 
 ### Clean Architecture Layers
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                       main.ts                                │
-│              (Dependency Injection Root)                     │
-└─────────────────────────────────────────────────────────────┘
-                             │
-            ┌────────────────┼────────────────┐
-            ▼                ▼                ▼
-    ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-    │ Presentation │  │ Presentation │  │ Shared       │
-    │ (MCP Server) │  │ (HTTP Server)│  │ Utilities    │
-    └──────────────┘  └──────────────┘  └──────────────┘
-            │                │
-            └────────────────┼─────────────────┘
-                             ▼
-                    ┌──────────────┐
-                    │ Application  │
-                    │ (Use Cases)  │
-                    └──────────────┘
-                             │
-                    ┌────────┴────────┐
-                    ▼                 ▼
-            ┌──────────────┐  ┌──────────────┐
-            │ Domain       │  │ Infrastructure│
-            │ (Entities &  │  │ (Database,    │
-            │  Interfaces) │  │  HTTP, Config)│
-            └──────────────┘  └──────────────┘
+┌─────────────────────┐          ┌─────────────────────────┐
+│    main.ts          │          │    main-http.ts         │
+│  (MCP Entry Point)  │          │  (HTTP Entry Point)     │
+│  Started on-demand  │          │  Runs independently     │
+└─────────────────────┘          └─────────────────────────┘
+          │                                  │
+          ▼                                  ▼
+    ┌──────────────┐                ┌──────────────┐
+    │ Presentation │                │ Presentation │
+    │ (MCP Server) │                │ (HTTP Server)│
+    └──────────────┘                └──────────────┘
+          │                                  │
+          └──────────────┬───────────────────┘
+                         ▼
+                ┌──────────────┐
+                │ Application  │
+                │ (Use Cases)  │
+                └──────────────┘
+                         │
+                ┌────────┴────────┐
+                ▼                 ▼
+        ┌──────────────┐  ┌──────────────┐
+        │ Domain       │  │ Infrastructure│
+        │ (Entities &  │  │ (Database,    │
+        │  Interfaces) │  │  HTTP, Config)│
+        └──────────────┘  └──────────────┘
 ```
 
 ### Folder Structure
@@ -96,7 +151,8 @@ src/
 │   ├── errors/
 │   └── utils/
 │
-└── main.ts                    # Entry point (composition root)
+├── main.ts                    # MCP server entry point (stdio)
+└── main-http.ts               # HTTP server entry point (webhook receiver)
 ```
 
 ### Key Components
@@ -166,10 +222,12 @@ Both servers (MCP and Express) communicate via **shared SQLite database**:
 ```
 
 **Key Points**:
+- **Two separate processes**: MCP server (on-demand) and HTTP server (always running)
 - No direct inter-process communication needed
 - Database polling for async coordination
-- Multiple MCP instances can share the same database
-- Only the instance that binds the port runs cleanup tasks
+- HTTP server must be started independently and kept running
+- MCP server is invoked by Claude Desktop when tools are used
+- Both servers share the same SQLite database for coordination
 
 ## Environment Configuration
 

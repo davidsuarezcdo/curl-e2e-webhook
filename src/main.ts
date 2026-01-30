@@ -16,7 +16,6 @@ import { GetTestResults } from "./application/use-cases/GetTestResults.js";
 import { ClearTestResults } from "./application/use-cases/ClearTestResults.js";
 
 // Presentation
-import { ExpressServer } from "./presentation/http/ExpressServer.js";
 import { McpServer } from "./presentation/mcp/McpServer.js";
 import { ToolHandlers } from "./presentation/mcp/tools/ToolHandlers.js";
 
@@ -61,12 +60,8 @@ async function main() {
     clearTestResults
   );
 
-  // 4. Create presentation layer (servers)
-  const expressServer = new ExpressServer(testRepository, config, logger);
+  // 4. Create and start MCP server
   const mcpServer = new McpServer(toolHandlers, config, logger);
-
-  // 5. Start both servers
-  await expressServer.start();
   await mcpServer.start();
 }
 
