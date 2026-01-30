@@ -19,7 +19,10 @@
       "Bash(pnpm approve-builds:*)",
       "Bash(pnpm run build:*)",
       "Bash(chmod:*)",
-      "Bash(./example-test.sh:*)"
+      "Bash(./example-test.sh:*)",
+      "Bash(node dist/main.js:*)",
+      "Bash(pnpm rebuild:*)",
+      "Bash(curl:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
