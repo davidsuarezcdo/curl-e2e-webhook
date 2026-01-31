@@ -1,14 +1,20 @@
 import Database from "better-sqlite3";
-import { resolve } from "path";
-import { ITestRepository } from "../../domain/repositories/ITestRepository.js";
+import {
+  ITestRepository,
+  TestFilter,
+  PaginationOptions,
+  PaginatedTests,
+  TestStats,
+} from "../../domain/repositories/ITestRepository.js";
 import { WebhookTest, TestStatus } from "../../domain/entities/WebhookTest.js";
+import { getDatabase, closeDatabase } from "./DatabaseConnection.js";
 
 export class SqliteTestRepository implements ITestRepository {
   private db: Database.Database;
   private cleanupInterval?: NodeJS.Timeout;
 
   constructor(dbPath: string = "./webhook-tests.db") {
-    this.db = new Database(resolve(dbPath));
+    this.db = getDatabase(dbPath);
     this.initializeSchema();
   }
 
@@ -48,7 +54,7 @@ export class SqliteTestRepository implements ITestRepository {
     requestType: string,
     timeoutSeconds: number,
     httpRequest?: any,
-    httpResponse?: any
+    httpResponse?: any,
   ): void {
     const now = Date.now();
     const timeoutAt = now + timeoutSeconds * 1000;
@@ -61,12 +67,12 @@ export class SqliteTestRepository implements ITestRepository {
         // Don't delete active tests - throw error
         throw new Error(
           `testId '${testId}' is already in use by an active test. ` +
-            `Please use a different testId or wait for the current test to complete.`
+            `Please use a different testId or wait for the current test to complete.`,
         );
       } else {
         // Auto-cleanup completed/timeout tests
         console.error(
-          `[DB] Auto-cleanup: removing previous test '${testId}' (status: ${existingTest.status})`
+          `[DB] Auto-cleanup: removing previous test '${testId}' (status: ${existingTest.status})`,
         );
         this.deleteTest(testId);
       }
@@ -86,7 +92,7 @@ export class SqliteTestRepository implements ITestRepository {
       httpRequest ? JSON.stringify(httpRequest) : null,
       httpResponse ? JSON.stringify(httpResponse) : null,
       now,
-      timeoutAt
+      timeoutAt,
     );
   }
 
@@ -111,7 +117,7 @@ export class SqliteTestRepository implements ITestRepository {
       row.httpRequest,
       row.httpResponse,
       row.webhookPayload,
-      row.error
+      row.error,
     );
   }
 
@@ -134,7 +140,12 @@ export class SqliteTestRepository implements ITestRepository {
       WHERE testId = ? AND status = 'pending'
     `);
 
-    const result = stmt.run(JSON.stringify(webhookPayload), now, duration, testId);
+    const result = stmt.run(
+      JSON.stringify(webhookPayload),
+      now,
+      duration,
+      testId,
+    );
     return result.changes > 0;
   }
 
@@ -164,7 +175,7 @@ export class SqliteTestRepository implements ITestRepository {
   async waitForCompletion(
     testId: string,
     timeoutSeconds: number,
-    pollIntervalMs: number = 200
+    pollIntervalMs: number = 200,
   ): Promise<WebhookTest> {
     const startTime = Date.now();
     const timeoutMs = timeoutSeconds * 1000;
@@ -190,7 +201,7 @@ export class SqliteTestRepository implements ITestRepository {
         if (test.isTimedOut()) {
           clearInterval(interval);
           reject(
-            new Error(test.error || `Timeout after ${timeoutSeconds} seconds`)
+            new Error(test.error || `Timeout after ${timeoutSeconds} seconds`),
           );
           return;
         }
@@ -230,9 +241,77 @@ export class SqliteTestRepository implements ITestRepository {
           row.httpRequest,
           row.httpResponse,
           row.webhookPayload,
-          row.error
-        )
+          row.error,
+        ),
     );
+  }
+
+  getTestsPaginated(
+    filter: TestFilter,
+    pagination: PaginationOptions,
+  ): PaginatedTests {
+    const { whereClause, params } = this.buildWhereClause(filter);
+    const total = this.getTestCount(filter);
+
+    const stmt = this.db.prepare(`
+      SELECT * FROM webhook_tests
+      ${whereClause}
+      ORDER BY createdAt DESC
+      LIMIT ? OFFSET ?
+    `);
+
+    const rows = stmt.all(
+      ...params,
+      pagination.limit,
+      pagination.offset,
+    ) as any[];
+    const data = rows.map((row) => this.rowToWebhookTest(row));
+
+    return {
+      data,
+      total,
+      limit: pagination.limit,
+      offset: pagination.offset,
+      hasMore: pagination.offset + data.length < total,
+    };
+  }
+
+  getTestCount(filter: TestFilter): number {
+    const { whereClause, params } = this.buildWhereClause(filter);
+
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) as count FROM webhook_tests
+      ${whereClause}
+    `);
+
+    const result = stmt.get(...params) as { count: number };
+    return result.count;
+  }
+
+  getStats(): TestStats {
+    const stats = this.db
+      .prepare(
+        `
+      SELECT
+        COUNT(*) as totalTests,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completedTests,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pendingTests,
+        SUM(CASE WHEN status = 'timeout' THEN 1 ELSE 0 END) as timedOutTests,
+        AVG(CASE WHEN status = 'completed' THEN duration ELSE NULL END) as avgDuration,
+        SUM(CASE WHEN createdAt > ? THEN 1 ELSE 0 END) as recentTests
+      FROM webhook_tests
+    `,
+      )
+      .get(Date.now() - 24 * 60 * 60 * 1000) as any;
+
+    return {
+      totalTests: stats.totalTests || 0,
+      completedTests: stats.completedTests || 0,
+      pendingTests: stats.pendingTests || 0,
+      timedOutTests: stats.timedOutTests || 0,
+      avgDuration: Math.round(stats.avgDuration || 0),
+      recentTests: stats.recentTests || 0,
+    };
   }
 
   clearAllTests(): number {
@@ -277,16 +356,19 @@ export class SqliteTestRepository implements ITestRepository {
     console.error("[DB] Starting cleanup task (every 5 minutes)");
 
     // Run cleanup every 5 minutes
-    this.cleanupInterval = setInterval(() => {
-      const timedOut = this.cleanupTimedOutTests();
-      const oldTests = this.cleanupOldTests(24);
+    this.cleanupInterval = setInterval(
+      () => {
+        const timedOut = this.cleanupTimedOutTests();
+        const oldTests = this.cleanupOldTests(24);
 
-      if (timedOut > 0 || oldTests > 0) {
-        console.error(
-          `[DB] Cleanup: ${timedOut} timed out, ${oldTests} old tests removed`
-        );
-      }
-    }, 5 * 60 * 1000);
+        if (timedOut > 0 || oldTests > 0) {
+          console.error(
+            `[DB] Cleanup: ${timedOut} timed out, ${oldTests} old tests removed`,
+          );
+        }
+      },
+      5 * 60 * 1000,
+    );
   }
 
   stopCleanupTask() {
@@ -299,7 +381,51 @@ export class SqliteTestRepository implements ITestRepository {
 
   close() {
     this.stopCleanupTask();
-    this.db.close();
+    // Connection is managed by DatabaseConnection singleton
+  }
+
+  private buildWhereClause(filter: TestFilter): {
+    whereClause: string;
+    params: unknown[];
+  } {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (filter.status) {
+      conditions.push("status = ?");
+      params.push(filter.status);
+    }
+
+    if (filter.fromDate) {
+      conditions.push("createdAt >= ?");
+      params.push(filter.fromDate.getTime());
+    }
+
+    if (filter.toDate) {
+      conditions.push("createdAt <= ?");
+      params.push(filter.toDate.getTime());
+    }
+
+    const whereClause =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    return { whereClause, params };
+  }
+
+  private rowToWebhookTest(row: any): WebhookTest {
+    return new WebhookTest(
+      row.testId,
+      row.status as TestStatus,
+      row.requestType,
+      new Date(row.createdAt),
+      new Date(row.timeoutAt),
+      row.completedAt ? new Date(row.completedAt) : undefined,
+      row.duration,
+      row.httpRequest,
+      row.httpResponse,
+      row.webhookPayload,
+      row.error,
+    );
   }
 }
 
@@ -317,5 +443,6 @@ export function closeTestRepository() {
   if (dbInstance) {
     dbInstance.close();
     dbInstance = null;
+    closeDatabase();
   }
 }

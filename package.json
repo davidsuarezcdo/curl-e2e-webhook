@@ -11,9 +11,13 @@
   },
   "scripts": {
     "build": "tsc",
+    "build:frontend": "cd frontend && pnpm install --ignore-workspace && pnpm run build",
+    "build:all": "pnpm run build && pnpm run build:frontend",
     "watch": "tsc --watch",
     "dev:mcp": "tsx src/main.ts",
     "dev:http": "tsx src/main-http.ts",
+    "dev:frontend": "cd frontend && pnpm run dev --host",
+    "dev": "concurrently \"pnpm run dev:http\" \"pnpm run dev:frontend\"",
     "start:mcp": "node dist/main.js",
     "start:http": "node dist/main-http.js",
     "prepare": "pnpm run build"
@@ -41,6 +45,7 @@
     "@types/express": "^4.17.21",
     "@types/node": "^20.10.5",
     "@types/uuid": "^9.0.7",
+    "concurrently": "^9.1.0",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
   }

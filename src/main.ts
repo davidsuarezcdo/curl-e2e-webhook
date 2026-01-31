@@ -4,8 +4,10 @@
 import { Config } from "./infrastructure/config/Config.js";
 import { ConsoleLogger } from "./infrastructure/logger/ConsoleLogger.js";
 import { getTestRepository } from "./infrastructure/database/SqliteTestRepository.js";
+import { getTestLogRepository } from "./infrastructure/database/SqliteTestLogRepository.js";
 import { FetchHttpExecutor } from "./infrastructure/http/FetchHttpExecutor.js";
 import { CurlParser } from "./infrastructure/http/CurlParser.js";
+import { TestLoggerService } from "./infrastructure/logger/TestLoggerService.js";
 
 // Application
 import { ExecuteCurlAndWaitWebhook } from "./application/use-cases/ExecuteCurlAndWaitWebhook.js";
@@ -24,8 +26,10 @@ async function main() {
   const config = new Config();
   const logger = new ConsoleLogger();
   const testRepository = getTestRepository(config.dbPath);
+  const testLogRepository = getTestLogRepository(config.dbPath);
   const httpExecutor = new FetchHttpExecutor();
   const curlParser = new CurlParser();
+  const testLogger = new TestLoggerService(testLogRepository);
 
   // 2. Create use cases (application layer)
   const executeCurlAndWaitWebhook = new ExecuteCurlAndWaitWebhook(
@@ -33,13 +37,14 @@ async function main() {
     httpExecutor,
     curlParser,
     config,
-    logger
+    logger,
+    testLogger,
   );
 
   const executeHttpRequest = new ExecuteHttpRequest(
     httpExecutor,
     curlParser,
-    logger
+    logger,
   );
 
   const getWebhookUrl = new GetWebhookUrl(config);
@@ -57,7 +62,7 @@ async function main() {
     getWebhookUrl,
     waitForWebhook,
     getTestResults,
-    clearTestResults
+    clearTestResults,
   );
 
   // 4. Create and start MCP server

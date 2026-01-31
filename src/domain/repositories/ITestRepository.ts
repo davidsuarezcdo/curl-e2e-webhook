@@ -1,4 +1,32 @@
-import { WebhookTest } from "../entities/WebhookTest.js";
+import { WebhookTest, TestStatus } from "../entities/WebhookTest.js";
+
+export interface TestFilter {
+  status?: TestStatus;
+  fromDate?: Date;
+  toDate?: Date;
+}
+
+export interface PaginationOptions {
+  limit: number;
+  offset: number;
+}
+
+export interface PaginatedTests {
+  data: WebhookTest[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+export interface TestStats {
+  totalTests: number;
+  completedTests: number;
+  pendingTests: number;
+  timedOutTests: number;
+  avgDuration: number;
+  recentTests: number;
+}
 
 export interface ITestRepository {
   createTest(
@@ -6,7 +34,7 @@ export interface ITestRepository {
     requestType: string,
     timeoutSeconds: number,
     httpRequest?: any,
-    httpResponse?: any
+    httpResponse?: any,
   ): void;
 
   getTest(testId: string): WebhookTest | null;
@@ -17,10 +45,19 @@ export interface ITestRepository {
 
   waitForCompletion(
     testId: string,
-    timeoutSeconds: number
+    timeoutSeconds: number,
   ): Promise<WebhookTest>;
 
   getAllTests(limit: number): WebhookTest[];
+
+  getTestsPaginated(
+    filter: TestFilter,
+    pagination: PaginationOptions,
+  ): PaginatedTests;
+
+  getTestCount(filter: TestFilter): number;
+
+  getStats(): TestStats;
 
   clearAllTests(): number;
 
